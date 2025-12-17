@@ -1,13 +1,15 @@
 # Traffic Anomaly Detection Backend
 
-A FastAPI-based backend system for traffic monitoring and anomaly detection.
+A FastAPI-based backend system for traffic monitoring and anomaly detection with JWT authentication.
 
 ## Features
 
 - **Clean Architecture**: Organized with routers, models, schemas, and services
+- **JWT Authentication**: Secure stateless authentication with Bearer tokens
 - **Async SQLAlchemy**: Asynchronous database operations with SQLite
 - **CORS Enabled**: Configured for React frontend integration
 - **Type Safety**: Pydantic schemas for request/response validation
+- **Password Hashing**: Bcrypt-based secure password storage
 
 ## Project Structure
 
@@ -16,19 +18,29 @@ b-monitor-be/
 ├── app/
 │   ├── core/
 │   │   ├── __init__.py
-│   │   └── database.py       # Database configuration
+│   │   ├── database.py       # Database configuration
+│   │   ├── auth.py          # JWT & password utilities
+│   │   └── dependencies.py   # Auth dependencies
 │   ├── models/
 │   │   ├── __init__.py
 │   │   └── models.py         # SQLAlchemy models
 │   ├── schemas/
 │   │   ├── __init__.py
 │   │   └── schemas.py        # Pydantic schemas
-│   ├── routers/              # API endpoints (to be implemented)
-│   ├── services/             # Business logic (to be implemented)
+│   ├── routers/
+│   │   ├── __init__.py
+│   │   ├── auth.py          # Authentication endpoints
+│   │   └── users.py         # User endpoints
+│   ├── services/
+│   │   ├── __init__.py
+│   │   └── user_service.py  # User business logic
 │   └── __init__.py
 ├── main.py                   # FastAPI application entry point
 ├── requirements.txt          # Python dependencies
 ├── .env.example             # Environment variables template
+├── setup.bat / setup.sh     # Automated setup scripts
+├── test_auth.py             # Authentication test script
+├── AUTH_README.md           # Authentication documentation
 └── .gitignore
 ```
 
@@ -40,6 +52,7 @@ b-monitor-be/
 
    - id (Primary Key)
    - username (unique)
+   - email (unique)
    - password (hashed)
    - created_at, updated_at
 
@@ -67,6 +80,23 @@ b-monitor-be/
    - created_at, updated_at
 
 ## Setup Instructions
+
+### Quick Setup (Recommended)
+
+**Windows:**
+
+```bash
+setup.bat
+```
+
+**Linux/Mac:**
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+### Manual Setup
 
 ### 1. Create Virtual Environment
 
@@ -110,6 +140,62 @@ uvicorn main:app --reload
 ```
 
 The API will be available at: `http://localhost:8000`
+
+### 6. Test Authentication
+
+```bash
+# Install requests library for testing
+pip install requests
+
+# Run test script
+python test_auth.py
+```
+
+## Authentication
+
+The API uses JWT (JSON Web Tokens) for authentication. See [AUTH_README.md](AUTH_README.md) for detailed documentation.
+
+### Quick Start
+
+1. **Register a user:**
+
+```bash
+POST /auth/register
+{
+  "username": "john_doe",
+  "email": "john@example.com",
+  "password": "securepass123"
+}
+```
+
+2. **Login to get token:**
+
+```bash
+POST /auth/login
+{
+  "username": "john_doe",
+  "password": "securepass123"
+}
+```
+
+3. **Use token in requests:**
+
+```bash
+GET /users/me
+Headers: Authorization: Bearer {your_token}
+```
+
+### Protected Routes
+
+To protect any endpoint, use the `CurrentUser` dependency:
+
+```python
+from app.core.dependencies import CurrentUser
+
+@router.get("/my-endpoint")
+async def my_endpoint(current_user: CurrentUser):
+    return {"user_id": current_user.id}
+```
 
 ## API Documentation
 

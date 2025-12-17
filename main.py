@@ -54,9 +54,14 @@ async def health_check():
     return {"status": "healthy"}
 
 
-# Import and include routers here (once created)
-# from app.routers import users, cameras, anomalies, normal_features
-# app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
-# app.include_router(cameras.router, prefix="/api/v1/cameras", tags=["Cameras"])
-# app.include_router(anomalies.router, prefix="/api/v1/anomalies", tags=["Anomalies"])
-# app.include_router(normal_features.router, prefix="/api/v1/normal-features", tags=["Normal Features"])
+# Import and include routers
+from app.routers import auth, users, cameras, anomalies
+
+app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+app.include_router(users.router, prefix="/users", tags=["Users"])
+app.include_router(cameras.router, prefix="/cameras", tags=["Cameras"])
+app.include_router(anomalies.router, prefix="/anomalies", tags=["Anomalies"])
+
+# Additional routers to be added later
+# from app.routers import normal_features
+# app.include_router(normal_features.router, prefix="/normal-features", tags=["Normal Features"])
