@@ -129,6 +129,8 @@ class AnomalyBase(BaseModel):
     time: Optional[datetime] = None
     anomaly_score: float = 0.0
     bounding_box: Optional[str] = ""
+    frame_id: int = 0
+    class_id: int = 0
 
 
 class AnomalyCreate(AnomalyBase):
@@ -142,6 +144,8 @@ class AnomalyUpdate(BaseModel):
     time: Optional[datetime] = None
     anomaly_score: Optional[float] = None
     bounding_box: Optional[str] = None
+    frame_id: Optional[int] = None
+    class_id: Optional[int] = None
 
 
 class AnomalyResponse(AnomalyBase):

@@ -76,6 +76,8 @@ class Anomaly(Base):
     cam_id = Column(Integer, ForeignKey("cameras.id"), nullable=False)
     anomaly_score = Column(Float, nullable=False, default=0.0)
     bounding_box = Column(String(255), nullable=False, default="")  # e.g., "x1,y1,x2,y2"
+    frame_id = Column(Integer, default=0)
+    class_id = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
