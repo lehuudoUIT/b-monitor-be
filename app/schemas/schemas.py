@@ -93,6 +93,11 @@ class CameraResponse(CameraBase):
     
     model_config = ConfigDict(from_attributes=True)
 
+class CameraListResponse(BaseModel):
+    items: List[CameraResponse] # This tells FastAPI: "Convert these DB objects using CameraResponse"
+    total: int
+    skip: int
+    limit: int
 
 # NormalFeature Schemas
 class NormalFeatureBase(BaseModel):
@@ -122,6 +127,8 @@ class AnomalyBase(BaseModel):
     description: Optional[str] = None
     level: AnomalyLevel = AnomalyLevel.medium
     time: Optional[datetime] = None
+    anomaly_score: float = 0.0
+    bounding_box: Optional[str] = ""
 
 
 class AnomalyCreate(AnomalyBase):
@@ -133,6 +140,8 @@ class AnomalyUpdate(BaseModel):
     description: Optional[str] = None
     level: Optional[AnomalyLevel] = None
     time: Optional[datetime] = None
+    anomaly_score: Optional[float] = None
+    bounding_box: Optional[str] = None
 
 
 class AnomalyResponse(AnomalyBase):

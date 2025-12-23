@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from app.core.database import get_db
 from app.core.dependencies import CurrentUser
-from app.schemas.schemas import CameraCreate, CameraUpdate, CameraResponse
+from app.schemas.schemas import CameraCreate, CameraUpdate, CameraResponse, CameraListResponse
 from app.services import camera_service
 
 router = APIRouter()
@@ -35,7 +35,7 @@ async def create_camera(
     return camera
 
 
-@router.get("/", response_model=dict)
+@router.get("/", response_model=CameraListResponse)
 async def list_cameras(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
@@ -61,9 +61,9 @@ async def list_cameras(
     # For now, only return user's own cameras
     # In future, check if user is admin when all=True
     user_id = current_user.id if not all else None
-    
     cameras, total = await camera_service.get_cameras(db, skip, limit, user_id)
-    
+    print("Total cameras fetched:", total)
+    print("Cameras:", cameras)    
     return {
         "items": cameras,
         "total": total,
