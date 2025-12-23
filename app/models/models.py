@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum as SQLEnum, Text
+from sqlalchemy import Column, Float, Integer, String, DateTime, ForeignKey, Enum as SQLEnum, Text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -74,6 +74,8 @@ class Anomaly(Base):
     description = Column(Text)
     level = Column(SQLEnum(AnomalyLevel), nullable=False, default=AnomalyLevel.medium)
     cam_id = Column(Integer, ForeignKey("cameras.id"), nullable=False)
+    anomaly_score = Column(Float, nullable=False, default=0.0)
+    bounding_box = Column(String(255), nullable=False, default="")  # e.g., "x1,y1,x2,y2"
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
