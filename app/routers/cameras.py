@@ -60,10 +60,9 @@ async def list_cameras(
     """
     # For now, only return user's own cameras
     # In future, check if user is admin when all=True
-    user_id = current_user.id if not all else None
+    user_id = current_user.id
+    
     cameras, total = await camera_service.get_cameras(db, skip, limit, user_id)
-    print("Total cameras fetched:", total)
-    print("Cameras:", cameras)    
     return {
         "items": cameras,
         "total": total,
