@@ -59,8 +59,11 @@ async def get_anomalies(
     db: AsyncSession,
     skip: int = 0,
     limit: int = 10,
+    order: str = "desc",
+    field: str = "time",
     camera_id: Optional[int] = None,
     level: Optional[AnomalyLevel] = None,
+    frame_id: Optional[int] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     user_id: Optional[int] = None
@@ -92,6 +95,9 @@ async def get_anomalies(
         # Subquery to get camera IDs belonging to user
         camera_subquery = select(Camera.id).filter(Camera.user_id == user_id)
         filters.append(Anomaly.cam_id.in_(camera_subquery))
+
+    if frame_id is not None:
+        filters.append(Anomaly.frame_id == frame_id)
     
     # Apply filters
     if filters:
@@ -106,7 +112,11 @@ async def get_anomalies(
     total = total_result.scalar_one()
     
     # Apply pagination and ordering
-    query = query.offset(skip).limit(limit).order_by(Anomaly.time.desc())
+    if field == "frame_id":
+        query = query.order_by(Anomaly.frame_id.asc() if order == "asc" else Anomaly.frame_id.desc())
+    else:
+        query = query.order_by(Anomaly.time.asc() if order == "asc" else Anomaly.time.desc())
+    query = query.offset(skip).limit(limit)
     
     result = await db.execute(query)
     anomalies = result.scalars().all()

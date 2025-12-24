@@ -5,7 +5,7 @@ from datetime import date
 
 from app.core.database import get_db
 from app.core.dependencies import CurrentUser
-from app.schemas.schemas import AnomalyCreate, AnomalyResponse, AnomalyLevel, VideoProcessRequest, VideoProcessResponse
+from app.schemas.schemas import AnomalyCreate, AnomalyListResponse, AnomalyResponse, AnomalyLevel, VideoProcessRequest, VideoProcessResponse
 from app.services import anomaly_service
 from app.services.video_processing_service import process_video_for_anomalies
 
@@ -33,14 +33,17 @@ async def create_anomaly(
     return anomaly
 
 
-@router.get("/", response_model=dict)
+@router.get("/", response_model=AnomalyListResponse)
 async def list_anomalies(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(10, ge=1, le=100, description="Number of records to return"),
+    order: str = Query("desc", regex="^(asc|desc)$", description="Order by frame id: asc or desc"),
+    field: str = Query("time", regex="^(time|frame_id)$", description="Field to order by: time or frame_id"),
     camera_id: Optional[int] = Query(None, description="Filter by camera ID"),
     level: Optional[AnomalyLevel] = Query(None, description="Filter by anomaly level"),
+    frame_id: Optional[int] = Query(None, description="Filter by specific frame ID"),
     start_date: Optional[date] = Query(None, description="Filter by start date (YYYY-MM-DD)"),
     end_date: Optional[date] = Query(None, description="Filter by end date (YYYY-MM-DD)")
 ):
@@ -83,6 +86,9 @@ async def list_anomalies(
         db=db,
         skip=skip,
         limit=limit,
+        order=order,
+        field=field,
+        frame_id=frame_id,
         camera_id=camera_id,
         level=level,
         start_date=start_date,
@@ -95,6 +101,7 @@ async def list_anomalies(
         "total": total,
         "skip": skip,
         "limit": limit,
+        "order": order,
         "filters": {
             "camera_id": camera_id,
             "level": level.value if level else None,

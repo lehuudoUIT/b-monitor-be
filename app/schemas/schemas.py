@@ -156,6 +156,12 @@ class AnomalyResponse(AnomalyBase):
     
     model_config = ConfigDict(from_attributes=True)
 
+class AnomalyListResponse(BaseModel):
+    items: List[AnomalyResponse] # This tells FastAPI: "Convert these DB objects using AnomalyResponse"
+    total: int
+    skip: int
+    limit: int
+    order: str
 
 # Extended Response Schemas (with relationships)
 class CameraWithRelations(CameraResponse):
