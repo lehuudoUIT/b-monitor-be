@@ -5,8 +5,9 @@ from datetime import date
 
 from app.core.database import get_db
 from app.core.dependencies import CurrentUser
-from app.schemas.schemas import AnomalyCreate, AnomalyResponse, AnomalyLevel
+from app.schemas.schemas import AnomalyCreate, AnomalyResponse, AnomalyLevel, VideoProcessRequest, VideoProcessResponse
 from app.services import anomaly_service
+from app.services.video_processing_service import process_video_for_anomalies
 
 router = APIRouter()
 
@@ -183,3 +184,68 @@ async def get_camera_anomaly_summary(
         "by_level": level_counts,
         "recent_anomalies": anomalies[:5]  # Most recent 5
     }
+
+
+@router.post("/process-video", response_model=VideoProcessResponse)
+async def process_video(
+    request: VideoProcessRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Process video from a local camera to detect anomalies using AI server.
+    
+    **Workflow:**
+    1. Validate camera (must be type='local' and owned by current user)
+    2. Load video from camera's local path
+    3. Extract frames and encode to base64
+    4. Create batches with sliding window (default: 7 frames per batch, step=1)
+    5. Send batches to AI server for inference (max 10 concurrent requests)
+    6. Parse detection results (bounding boxes, anomaly scores, class IDs)
+    7. Save anomalies with score >= 0.5 to database
+    
+    **Request Body:**
+    - **camera_id**: ID of the camera (must be type='local')
+    - **batch_size**: Number of frames per batch (default: 7, range: 3-30)
+    - **sliding_window**: Step size for sliding window (default: 1, range: 1-10)
+    
+    **Response:**
+    - **success**: Whether processing succeeded
+    - **message**: Status message
+    - **video_info**: Video metadata (fps, resolution, duration, frame count)
+    - **total_frames**: Number of frames extracted
+    - **total_batches**: Number of batches created and sent to AI
+    - **anomalies_detected**: Number of anomalies saved (score >= 0.5)
+    - **anomalies**: List of detected anomaly objects
+    
+    **Error Cases:**
+    - 404: Camera not found or video file not found
+    - 403: Camera does not belong to user
+    - 400: Camera type is not 'local' or video has insufficient frames
+    - 500: Video processing error or AI server error
+    
+    **Example:**
+    ```json
+    {
+        "camera_id": 1,
+        "batch_size": 7,
+        "sliding_window": 1
+    }
+    ```
+    
+    **AI Server Expectation:**
+    - Endpoint: POST http://localhost:5000/worker/inference
+    - Request: {"frames": ["base64_frame1", "base64_frame2", ...]}
+    - Response: {"detections": [{"bbox": {"x_min": 10, "y_min": 20, "x_max": 100, "y_max": 200}, "anomaly_score": 0.85, "class_id": 1}]}
+    
+    **Note:** Only cameras with type='local' are supported. For YouTube cameras, use a different endpoint.
+    """
+    result = await process_video_for_anomalies(
+        db=db,
+        camera_id=request.camera_id,
+        user_id=current_user.id,
+        batch_size=request.batch_size,
+        sliding_window=request.sliding_window
+    )
+    
+    return VideoProcessResponse(**result)

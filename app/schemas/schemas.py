@@ -169,3 +169,21 @@ class UserWithCameras(UserResponse):
     cameras: List[CameraResponse] = []
     
     model_config = ConfigDict(from_attributes=True)
+
+
+# Video Processing Schemas
+class VideoProcessRequest(BaseModel):
+    camera_id: int = Field(..., description="ID of the camera (must be type='local')")
+    batch_size: int = Field(7, ge=3, le=30, description="Number of frames per batch")
+    sliding_window: int = Field(1, ge=1, le=10, description="Sliding window step size")
+
+
+class VideoProcessResponse(BaseModel):
+    success: bool
+    message: str
+    camera_id: int
+    video_info: dict
+    total_frames: int
+    total_batches: int
+    anomalies_detected: int
+    anomalies: List[AnomalyResponse]
