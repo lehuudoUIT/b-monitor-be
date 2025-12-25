@@ -230,6 +230,13 @@ pip install alembic
 alembic init migrations
 ```
 
+Migration:
+
+```bash
+alembic revision --autogenerate -m "Add fps and resolution column to table camera"
+alembic upgrade head
+```
+
 ## License
 
 [Your License Here]
