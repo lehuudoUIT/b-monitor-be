@@ -42,6 +42,8 @@ class Camera(Base):
     status = Column(String(20), default="inactive")  # active, inactive, etc.
     url = Column(String(500), nullable=False)
     type = Column(SQLEnum(CameraType), nullable=False, default=CameraType.local)
+    fps = Column(Integer, default=0)
+    resolution = Column(String(50), default="")
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

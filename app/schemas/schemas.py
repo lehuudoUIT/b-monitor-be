@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, computed_field
 from datetime import datetime
 from typing import Optional, List
 from enum import Enum
+from app.core.constant import MSCOCO_CLASS_NAME
 
 
 class CameraType(str, Enum):
@@ -70,6 +71,8 @@ class CameraBase(BaseModel):
     status: Optional[str] = Field("inactive", max_length=20)
     url: str = Field(..., max_length=500)
     type: CameraType = CameraType.local
+    fps: Optional[int] = None
+    resolution: Optional[str] = None
 
 
 class CameraCreate(CameraBase):
@@ -83,6 +86,8 @@ class CameraUpdate(BaseModel):
     status: Optional[str] = Field(None, max_length=20)
     url: Optional[str] = Field(None, max_length=500)
     type: Optional[CameraType] = None
+    fps: Optional[int] = None
+    resolution: Optional[str] = None
 
 
 class CameraResponse(CameraBase):
@@ -162,6 +167,28 @@ class AnomalyListResponse(BaseModel):
     skip: int
     limit: int
     order: str
+# By frame response schema
+class AnomalyByFrameResponse(AnomalyBase):
+    id: int
+    cam_id: int
+    created_at: datetime
+    updated_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True)
+    @computed_field
+    def class_name(self) -> str:
+        # Logic ánh xạ: lấy từ dict, nếu không có trả về "Unknown"
+        return MSCOCO_CLASS_NAME.get(self.class_id, "Unknown")
+    
+class AnomalyByFrameListResponse(BaseModel):
+    items: List[AnomalyByFrameResponse] # This tells FastAPI: "Convert these DB objects using AnomalyByFrameResponse"
+    total: int
+    skip: int
+    limit: int
+    order: str
+class AnomalyByFrameListResponse(BaseModel):
+    items: List[AnomalyByFrameResponse] # This tells FastAPI: "Convert these DB objects using AnomalyByFrameResponse"
+    total: int
 
 # Extended Response Schemas (with relationships)
 class CameraWithRelations(CameraResponse):
