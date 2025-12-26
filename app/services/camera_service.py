@@ -130,6 +130,15 @@ async def delete_camera(db: AsyncSession, camera_id: int, user_id: int) -> bool:
             detail="Not authorized to delete this camera"
         )
     
+    if camera.type == "local":
+        # Optionally, delete local video file from storage
+        import os
+        try:
+            if os.path.exists(camera.url):
+                os.remove(camera.url)
+        except Exception as e:
+            print(f"Error deleting video file: {e}")
+    
     await db.delete(camera)
     await db.commit()
     return True
