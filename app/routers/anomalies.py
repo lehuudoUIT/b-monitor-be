@@ -5,7 +5,7 @@ from datetime import date
 
 from app.core.database import get_db
 from app.core.dependencies import CurrentUser
-from app.schemas.schemas import AnomalyCreate, AnomalyListResponse, AnomalyResponse, AnomalyLevel, VideoProcessRequest, VideoProcessResponse
+from app.schemas.schemas import AnomalyByFrameListResponse, AnomalyCreate, AnomalyListResponse, AnomalyResponse, AnomalyLevel, VideoProcessRequest, VideoProcessResponse
 from app.services import anomaly_service
 from app.services.video_processing_service import process_video_for_anomalies
 
@@ -110,6 +110,63 @@ async def list_anomalies(
         }
     }
 
+@router.get("/frame/{frame_id}", response_model=AnomalyByFrameListResponse)
+async def list_anomalies_by_frame(
+    frame_id: int,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    camera_id: int = Query(0, description="Filter by camera ID"),
+    level: Optional[AnomalyLevel] = Query(None, description="Filter by anomaly level"),
+    start_date: Optional[date] = Query(None, description="Filter by start date (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="Filter by end date (YYYY-MM-DD)")
+):
+    """
+    List anomalies for a specific frame ID with filtering and pagination.
+    
+    Returns anomalies from cameras belonging to the authenticated user.
+    
+    **Query Parameters:**
+    - **skip**: Number of records to skip (for pagination)
+    - **limit**: Maximum number of records to return (max 100)
+    - **camera_id**: Filter by specific camera ID
+    - **level**: Filter by anomaly level (violations, critical, high, medium, low)
+    - **start_date**: Filter anomalies from this date onwards (format: YYYY-MM-DD)
+    - **end_date**: Filter anomalies up to this date (format: YYYY-MM-DD)
+    
+    **Returns:**
+    - **items**: List of anomalies
+    - **total**: Total number of anomalies matching filters
+    - **skip**: Current skip value
+    - **limit**: Current limit value
+    - **filters**: Applied filters
+    
+    **Example:**
+    ```
+    GET /anomalies/frame/150?camera_id=1&level=critical&start_date=2025-01-01&limit=20
+    ```
+    """
+    # Validate camera ownership if camera_id is provided
+    if camera_id:
+        from app.services.camera_service import get_camera_by_id
+        camera = await get_camera_by_id(db, camera_id)
+        if camera and camera.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to access anomalies for this camera"
+            )
+    anomalies, total = await anomaly_service.get_anomalies(
+        db=db,
+        frame_id=frame_id,
+        camera_id=camera_id,
+        level=level,
+        start_date=start_date,
+        end_date=end_date,
+        user_id=current_user.id
+    )
+    return {
+        "items": anomalies,
+        "total": total,
+    }
 
 @router.get("/{anomaly_id}", response_model=AnomalyResponse)
 async def get_anomaly(
