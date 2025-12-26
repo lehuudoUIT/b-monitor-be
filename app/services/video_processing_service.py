@@ -5,11 +5,16 @@ Service for processing videos and detecting anomalies using AI server.
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any
 from fastapi import HTTPException, status
+import asyncio
+import logging
 
 from app.models.models import Anomaly, Camera
 from app.core.video_processor import VideoProcessor
 from app.core.ai_client import get_ai_client
+from app.core.database import async_session_maker
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 async def process_video_for_anomalies(
@@ -156,7 +161,11 @@ async def process_video_for_anomalies(
         # Refresh anomalies to get IDs
         for anomaly in anomalies_saved:
             await db.refresh(anomaly)
-        
+        # Update camera status to 'active' after processing
+        camera.status = "active"
+        db.add(camera)
+        await db.commit()
+
         return {
             "success": True,
             "message": f"Processed {total_batches} batches from video",
@@ -183,3 +192,42 @@ async def process_video_for_anomalies(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process video: {str(e)}"
         )
+
+
+async def process_video_background(camera_id: int, user_id: int, batch_size: int = 7, sliding_window: int = 1):
+    """
+    Background task to process video for anomalies with its own database session.
+    This function catches all exceptions to prevent them from affecting the main request.
+    
+    Args:
+        camera_id: ID of camera to process
+        user_id: ID of current user
+        batch_size: Number of frames per batch
+        sliding_window: Step size for sliding window
+    """
+    try:
+        # Create a new database session for this background task
+        async with async_session_maker() as db:
+            logger.info(f"Starting background video processing for camera {camera_id}")
+            result = await process_video_for_anomalies(
+                db=db,
+                camera_id=camera_id,
+                user_id=user_id,
+                batch_size=batch_size,
+                sliding_window=sliding_window
+            )
+            logger.info(f"Completed video processing for camera {camera_id}: {result.get('message')}")
+            return result
+    except Exception as e:
+        logger.error(f"Error in background video processing for camera {camera_id}: {str(e)}", exc_info=True)
+        # Update camera status to indicate error
+        try:
+            async with async_session_maker() as db:
+                from app.services.camera_service import get_camera_by_id
+                camera = await get_camera_by_id(db, camera_id)
+                if camera:
+                    camera.status = "error"
+                    db.add(camera)
+                    await db.commit()
+        except Exception as inner_e:
+            logger.error(f"Failed to update camera status after error: {str(inner_e)}")

@@ -14,6 +14,7 @@ from app.core.database import get_db
 from app.core.dependencies import CurrentUser
 from app.schemas.schemas import CameraCreate, CameraUpdate, CameraResponse, CameraListResponse
 from app.services import camera_service
+from app.services.video_processing_service import process_video_for_anomalies
 
 router = APIRouter()
 
@@ -262,13 +263,16 @@ async def upload_video(
                 print(f"Warning: Could not open video file {file_path} to read metadata.")
         except Exception as e:
             print(f"Error reading video metadata: {e}")
+        
+
+
 
         # Create camera record
         camera_data = CameraCreate(
             name=name,
             location=location,
             thumbnail="",
-            status="active",
+            status="inactive",
             url=file_path,
             type="local",
             fps=video_fps,
@@ -278,6 +282,15 @@ async def upload_video(
         
         camera = await camera_service.create_camera(db, camera_data)
         
+        # Start video processing in background (không đợi kết quả)
+        from app.services.video_processing_service import process_video_background
+        asyncio.create_task(process_video_background(
+            camera_id=camera.id,
+            user_id=current_user.id,
+            batch_size=7,
+            sliding_window=1
+        ))
+
         return camera
         
     except HTTPException:
