@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+import cv2
+from fastapi import APIRouter, Depends, Form, HTTPException, status, Query, UploadFile, File, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 import os
@@ -47,7 +49,7 @@ async def list_cameras(
     db: AsyncSession = Depends(get_db),
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(10, ge=1, le=100, description="Number of records to return"),
-    all: bool = Query(False, description="Get all cameras (admin only) or only user's cameras")
+    camera_type: Optional[str] = Query(None, description="Filter by camera type (local/youtube)"),
 ):
     """
     List cameras with pagination.
@@ -68,7 +70,7 @@ async def list_cameras(
     # In future, check if user is admin when all=True
     user_id = current_user.id
     
-    cameras, total = await camera_service.get_cameras(db, skip, limit, user_id)
+    cameras, total = await camera_service.get_cameras(db, skip, limit, user_id, camera_type)
     return {
         "items": cameras,
         "total": total,
@@ -142,9 +144,9 @@ async def delete_camera(
 
 @router.post("/upload-video", response_model=CameraResponse, status_code=status.HTTP_201_CREATED)
 async def upload_video(
-    name: str,
     current_user: CurrentUser,
-    location: str = "",
+    name: str = Form(...),
+    location: str = Form(""),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
 ):
@@ -241,6 +243,26 @@ async def upload_video(
                 if elapsed < expected_time:
                     await asyncio.sleep(expected_time - elapsed)
         
+        
+        video_fps = 30
+        video_resolution = "1920,1080"
+        # Use cv2 to extract metadata 
+        try:
+            cap = cv2.VideoCapture(file_path)
+            if cap.isOpened():
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                if fps > 0:
+                    video_fps = int(round(fps)) 
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                if width > 0 and height > 0:
+                    video_resolution = f"{width},{height}"
+                cap.release()
+            else:
+                print(f"Warning: Could not open video file {file_path} to read metadata.")
+        except Exception as e:
+            print(f"Error reading video metadata: {e}")
+
         # Create camera record
         camera_data = CameraCreate(
             name=name,
@@ -249,6 +271,8 @@ async def upload_video(
             status="active",
             url=file_path,
             type="local",
+            fps=video_fps,
+            resolution=video_resolution,
             user_id=current_user.id
         )
         
@@ -265,4 +289,164 @@ async def upload_video(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to upload video: {str(e)}"
+        )
+
+
+@router.get("/{camera_id}/stream")
+async def stream_video(
+    camera_id: int,
+    request: Request,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Stream video file from a local camera with Range request support.
+    
+    This endpoint streams video files for cameras with type='local'.
+    Supports HTTP Range requests to enable video seeking/scrubbing in browsers.
+    
+    **Features:**
+    - Streaming video playback
+    - Byte-range request support (seek/scrub)
+    - Proper Content-Type headers
+    - Resume capability
+    
+    **Path Parameters:**
+    - **camera_id**: ID of the camera (must be type='local')
+    
+    **Headers:**
+    - **Range**: Optional byte range (e.g., "bytes=0-1023")
+    
+    **Response:**
+    - 200: Full video content
+    - 206: Partial content (when Range header is provided)
+    - 404: Camera or video file not found
+    - 403: Not authorized to access this camera
+    - 400: Camera type is not 'local'
+    
+    **Example:**
+    ```html
+    <video controls>
+        <source src="http://localhost:8000/cameras/1/stream" type="video/mp4">
+    </video>
+    ```
+    
+    **Browser Usage:**
+    - Video player will automatically send Range requests
+    - Enables seeking to any position in the video
+    - Reduces initial loading time
+    """
+    # Get camera and validate
+    camera = await camera_service.get_camera_by_id(db, camera_id)
+    
+    if not camera:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Camera not found"
+        )
+    
+    # Check ownership
+    if camera.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this camera"
+        )
+    
+    # Check camera type
+    if camera.type.value != "local":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only cameras with type='local' support video streaming"
+        )
+    
+    # Get video file path
+    video_path = camera.url
+    
+    if not os.path.exists(video_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video file not found"
+        )
+    
+    # Get file size
+    file_size = os.path.getsize(video_path)
+    
+    # Parse Range header
+    range_header = request.headers.get("range")
+    
+    # Determine content type from file extension
+    ext = os.path.splitext(video_path)[1].lower()
+    content_type_map = {
+        ".mp4": "video/mp4",
+        ".avi": "video/x-msvideo",
+        ".mov": "video/quicktime",
+        ".mkv": "video/x-matroska",
+        ".flv": "video/x-flv",
+        ".wmv": "video/x-ms-wmv",
+        ".webm": "video/webm"
+    }
+    content_type = content_type_map.get(ext, "video/mp4")
+    
+    if range_header:
+        # Parse Range header (format: "bytes=start-end")
+        range_match = range_header.replace("bytes=", "").split("-")
+        start = int(range_match[0]) if range_match[0] else 0
+        end = int(range_match[1]) if range_match[1] else file_size - 1
+        end = min(end, file_size - 1)
+        
+        # Validate range
+        if start >= file_size or start > end:
+            raise HTTPException(
+                status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE,
+                detail="Invalid range"
+            )
+        
+        chunk_size = end - start + 1
+        
+        # Generator to read file chunk
+        async def file_iterator():
+            async with aiofiles.open(video_path, mode="rb") as f:
+                await f.seek(start)
+                remaining = chunk_size
+                while remaining > 0:
+                    read_size = min(8192, remaining)  # 8KB chunks
+                    data = await f.read(read_size)
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+        
+        # Return partial content (206)
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(chunk_size),
+            "Content-Type": content_type,
+        }
+        
+        return StreamingResponse(
+            file_iterator(),
+            status_code=206,
+            headers=headers,
+            media_type=content_type
+        )
+    
+    else:
+        # No range header - stream entire file
+        async def file_iterator():
+            async with aiofiles.open(video_path, mode="rb") as f:
+                while chunk := await f.read(8192):  # 8KB chunks
+                    yield chunk
+        
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+            "Content-Type": content_type,
+        }
+        
+        return StreamingResponse(
+            file_iterator(),
+            status_code=200,
+            headers=headers,
+            media_type=content_type
         )

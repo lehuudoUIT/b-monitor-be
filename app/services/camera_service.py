@@ -19,7 +19,9 @@ async def create_camera(db: AsyncSession, camera_data: CameraCreate) -> Camera:
         status=camera_data.status,
         url=camera_data.url,
         type=camera_data.type,
-        user_id=camera_data.user_id
+        user_id=camera_data.user_id,
+        fps=camera_data.fps,
+        resolution=camera_data.resolution
     )
     
     db.add(db_camera)
@@ -40,7 +42,8 @@ async def get_cameras(
     db: AsyncSession, 
     skip: int = 0, 
     limit: int = 10,
-    user_id: Optional[int] = None
+    user_id: Optional[int] = None,
+    camera_type: Optional[str] = None
 ) -> tuple[List[Camera], int]:
     """
     Get list of cameras with pagination.
@@ -58,6 +61,10 @@ async def get_cameras(
     if user_id is not None:
         count_query = count_query.filter(Camera.user_id == user_id)
     
+    if camera_type is not None:
+        query = query.filter(Camera.type == camera_type)
+        count_query = count_query.filter(Camera.type == camera_type)
+
     total_result = await db.execute(count_query)
     total = total_result.scalar_one()
     
