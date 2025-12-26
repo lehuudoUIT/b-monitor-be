@@ -135,6 +135,14 @@ copy .env.example .env
 
 ### 5. Run the Application
 
+- Step 1:
+
+```bash
+venv\Scripts\activate
+```
+
+- Step 2:
+
 ```bash
 uvicorn main:app --reload
 ```
