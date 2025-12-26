@@ -123,6 +123,63 @@ async def get_anomalies(
     
     return list(anomalies), total
 
+async def get_anomalies_by_camera(
+    db: AsyncSession,
+    order: str = "asc",
+    camera_id: Optional[int] = None,
+    level: Optional[AnomalyLevel] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    user_id: Optional[int] = None
+) -> tuple[List[Anomaly], int]:
+    """
+    Get list of anomalies with filtering and pagination.
+    Returns tuple of (anomalies, total_count).
+    """
+    # Build query
+    query = select(Anomaly)
+    filters = []
+    
+    # Filter by camera_id
+    if camera_id is not None:
+        filters.append(Anomaly.cam_id == camera_id)
+    
+    # Filter by level
+    if level is not None:
+        filters.append(Anomaly.level == level)
+    
+    # Filter by date range
+    if start_date:
+        filters.append(Anomaly.time >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        filters.append(Anomaly.time <= datetime.combine(end_date, datetime.max.time()))
+    
+    # Filter by user's cameras only
+    if user_id is not None:
+        # Subquery to get camera IDs belonging to user
+        camera_subquery = select(Camera.id).filter(Camera.user_id == user_id)
+        filters.append(Anomaly.cam_id.in_(camera_subquery))
+    
+    # Apply filters
+    if filters:
+        query = query.filter(and_(*filters))
+    
+    # Get total count
+    count_query = select(func.count()).select_from(Anomaly)
+    if filters:
+        count_query = count_query.filter(and_(*filters))
+    
+    total_result = await db.execute(count_query)
+    total = total_result.scalar_one()
+    
+    # Apply pagination and ordering
+    query = query.order_by(Anomaly.frame_id.desc() if order == "desc" else Anomaly.frame_id.asc())
+    
+    result = await db.execute(query)
+    anomalies = result.scalars().all()
+    
+    return list(anomalies), total
+
 
 async def verify_anomaly_access(db: AsyncSession, anomaly_id: int, user_id: int) -> Anomaly:
     """

@@ -183,11 +183,22 @@ class AnomalyByFrameResponse(AnomalyBase):
 class AnomalyByFrameListResponse(BaseModel):
     items: List[AnomalyByFrameResponse] # This tells FastAPI: "Convert these DB objects using AnomalyByFrameResponse"
     total: int
-    skip: int
-    limit: int
-    order: str
-class AnomalyByFrameListResponse(BaseModel):
-    items: List[AnomalyByFrameResponse] # This tells FastAPI: "Convert these DB objects using AnomalyByFrameResponse"
+
+# By Camera response schema
+class AnomalyByCameraResponse(AnomalyBase):
+    id: int
+    cam_id: int
+    created_at: datetime
+    updated_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True)
+    @computed_field
+    def class_name(self) -> str:
+        # Logic ánh xạ: lấy từ dict, nếu không có trả về "Unknown"
+        return MSCOCO_CLASS_NAME.get(self.class_id, "Unknown")
+    
+class AnomalyByCameraListResponse(BaseModel):
+    items: List[AnomalyByCameraResponse] # This tells FastAPI: "Convert these DB objects using AnomalyByCameraResponse"
     total: int
 
 # Extended Response Schemas (with relationships)
