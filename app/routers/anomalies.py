@@ -369,3 +369,40 @@ async def process_video(
     )
     
     return VideoProcessResponse(**result)
+
+@router.post("/inference", response_model=dict)
+async def inference_anomaly(
+    frame_list: List[str]
+):
+    """
+    Perform anomaly inference on a list of base64 encoded frames using the AI server.
+    
+    **Request Body:**
+    - **frame_list**: List of base64 encoded frames to be processed by the AI server.
+    
+    **Response:**
+    - **List of detected anomalies** with fields:
+        - **anomaly_score**: Normalized anomaly score
+        - **bounding_box**: Bounding box string "x_min,y_min,x_max,y_max"
+        - **class_id**: Detected class ID
+    
+    **Error Cases:**
+    - 503: AI server is not available
+    - 500: AI server failed to process frames
+    
+    **Example:**
+    ```json
+    {
+        "frame_list": ["base64_frame1", "base64_frame2", ...]
+    }
+    ```
+    
+    **AI Server Expectation:**
+    - Endpoint: POST http://localhost:5000/worker/inference
+    - Request: {"frames": ["base64_frame1", "base64_frame2", ...]}
+    - Response: {"detections": [{"bbox": {"x_min": 10, "y_min": 20, "x_max": 100, "y_max": 200}, "anomaly_score_normalized": 0.85, "class_id": 1}]}
+    """
+    result = await anomaly_service.inference_anomaly(frame_list)
+    return {
+        "detections": result
+    }

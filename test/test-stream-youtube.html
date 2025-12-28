@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Stream Test - Anomaly Detection</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .config-section {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 10px;
+            margin-bottom: 25px;
+        }
+
+        .config-section h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+            font-size: 0.95em;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 14px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            flex: 1;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+            transform: translateY(-2px);
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .stream-section {
+            text-align: center;
+        }
+
+        .stream-container {
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 20px 0;
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        #streamImage {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .stream-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            font-size: 1.2em;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-weight: 500;
+        }
+
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 15px;
+            background: #f8f9fa;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 2px solid #333;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+
+        .info-box h3 {
+            color: #2196F3;
+            margin-bottom: 10px;
+        }
+
+        .info-box ul {
+            margin-left: 20px;
+        }
+
+        .info-box li {
+            margin: 5px 0;
+        }
+
+        @media (max-width: 768px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+
+            .header h1 {
+                font-size: 1.8em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎥 YouTube Stream Test</h1>
+            <p>Real-time Anomaly Detection with AI</p>
+        </div>
+
+        <div class="content">
+            <!-- Configuration Section -->
+            <div class="config-section">
+                <h2>⚙️ Configuration</h2>
+                
+                <div class="form-group">
+                    <label for="baseUrl">API Base URL</label>
+                    <input type="text" id="baseUrl" value="http://localhost:8000" placeholder="http://localhost:8000">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="username">Username / Email</label>
+                        <input type="text" id="username" value="admin@example.com" placeholder="admin@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" value="admin123" placeholder="Password">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="cameraId">Camera ID</label>
+                    <input type="number" id="cameraId" value="1" min="1" placeholder="1">
+                </div>
+
+                <h3 style="margin: 25px 0 15px 0; color: #667eea;">Stream Parameters</h3>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="batchSize">Batch Size (5-15)</label>
+                        <input type="number" id="batchSize" value="7" min="5" max="15">
+                    </div>
+                    <div class="form-group">
+                        <label for="skipFrames">Skip Frames (1-30)</label>
+                        <input type="number" id="skipFrames" value="5" min="1" max="30">
+                    </div>
+                    <div class="form-group">
+                        <label for="fps">FPS (15-60)</label>
+                        <input type="number" id="fps" value="30" min="15" max="60">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="width">Width (640-1920)</label>
+                        <input type="number" id="width" value="1280" min="640" max="1920" step="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="height">Height (480-1080)</label>
+                        <input type="number" id="height" value="720" min="480" max="1080" step="1">
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn-primary" onclick="startStream()">▶️ Start Stream</button>
+                    <button class="btn-danger" onclick="stopStream()">⏹️ Stop Stream</button>
+                </div>
+            </div>
+
+            <!-- Status Section -->
+            <div id="statusContainer"></div>
+
+            <!-- Legend -->
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #00ff00;"></div>
+                    <span>Low (< 0.4)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #ffff00;"></div>
+                    <span>Medium (0.4-0.6)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #ffa500;"></div>
+                    <span>High (0.6-0.8)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #ff0000;"></div>
+                    <span>Critical (≥ 0.8)</span>
+                </div>
+            </div>
+
+            <!-- Stream Section -->
+            <div class="stream-section">
+                <div class="stream-container">
+                    <img id="streamImage" style="display: none;" alt="Stream">
+                    <div class="stream-overlay" id="streamOverlay">
+                        <div>📺 Click "Start Stream" to begin</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Info Box -->
+            <div class="info-box">
+                <h3>ℹ️ How It Works</h3>
+                <ul>
+                    <li><strong>Sliding Window:</strong> Uses batches of 7 frames for context-aware detection</li>
+                    <li><strong>Frame Skipping:</strong> Reduces GPU load by skipping frames between inferences</li>
+                    <li><strong>Real-time Detection:</strong> Draws bounding boxes with anomaly scores</li>
+                    <li><strong>Color Coding:</strong> Box colors indicate anomaly severity level</li>
+                    <li><strong>Delay:</strong> Expect 5-7 second delay for smooth processing</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentToken = null;
+        let streamUrl = null;
+        let isStreaming = false;
+
+        function showStatus(message, type = 'info') {
+            const container = document.getElementById('statusContainer');
+            container.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        async function login() {
+            const baseUrl = document.getElementById('baseUrl').value;
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            showStatus('🔐 Logging in...', 'info');
+
+            try {
+                const formData = new URLSearchParams();
+                formData.append('username', username);
+                formData.append('password', password);
+
+                const response = await fetch(`${baseUrl}/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: formData
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    currentToken = data.access_token;
+                    showStatus('✅ Login successful!', 'success');
+                    return true;
+                } else {
+                    const error = await response.text();
+                    showStatus(`❌ Login failed: ${error}`, 'error');
+                    return false;
+                }
+            } catch (error) {
+                showStatus(`❌ Login error: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        async function startStream() {
+            // Login first if no token
+            if (!currentToken) {
+                const success = await login();
+                if (!success) return;
+            }
+
+            const baseUrl = document.getElementById('baseUrl').value;
+            const cameraId = document.getElementById('cameraId').value;
+            const batchSize = document.getElementById('batchSize').value;
+            const skipFrames = document.getElementById('skipFrames').value;
+            const fps = document.getElementById('fps').value;
+            const width = document.getElementById('width').value;
+            const height = document.getElementById('height').value;
+
+            // Build stream URL
+            streamUrl = `${baseUrl}/cameras/${cameraId}/stream-youtube?` +
+                `batch_size=${batchSize}&skip_frames=${skipFrames}&fps=${fps}&` +
+                `width=${width}&height=${height}`;
+
+            showStatus('🎬 Starting stream... (this may take a few seconds)', 'info');
+
+            // Check if stream is accessible
+            try {
+                const testResponse = await fetch(streamUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${currentToken}`
+                    }
+                });
+
+                if (!testResponse.ok) {
+                    const error = await testResponse.text();
+                    showStatus(`❌ Stream error: ${error}`, 'error');
+                    return;
+                }
+
+                // Stream is accessible, display it
+                const streamImage = document.getElementById('streamImage');
+                const streamOverlay = document.getElementById('streamOverlay');
+
+                // Add auth header to image request (note: this won't work directly with img tag)
+                // For proper authentication, we'd need a different approach
+                // For now, we'll try direct image loading
+                streamImage.src = streamUrl + `&token=${currentToken}`;
+                streamImage.style.display = 'block';
+                streamOverlay.style.display = 'none';
+
+                isStreaming = true;
+                showStatus('✅ Stream started! Anomalies will be highlighted with colored bounding boxes.', 'success');
+
+                // Handle image load errors
+                streamImage.onerror = function() {
+                    showStatus('❌ Failed to load stream. Check camera settings and try again.', 'error');
+                    stopStream();
+                };
+
+            } catch (error) {
+                showStatus(`❌ Connection error: ${error.message}`, 'error');
+            }
+        }
+
+        function stopStream() {
+            const streamImage = document.getElementById('streamImage');
+            const streamOverlay = document.getElementById('streamOverlay');
+
+            streamImage.src = '';
+            streamImage.style.display = 'none';
+            streamOverlay.style.display = 'flex';
+            streamOverlay.innerHTML = '<div>📺 Stream stopped</div>';
+
+            isStreaming = false;
+            showStatus('⏹️ Stream stopped', 'info');
+        }
+
+        // Handle page unload
+        window.addEventListener('beforeunload', function() {
+            if (isStreaming) {
+                stopStream();
+            }
+        });
+    </script>
+</body>
+</html>

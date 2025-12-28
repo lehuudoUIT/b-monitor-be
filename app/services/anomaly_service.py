@@ -4,6 +4,7 @@ from sqlalchemy import func, and_
 from typing import Optional, List
 from datetime import datetime, date
 from fastapi import HTTPException, status
+from app.core.ai_client import get_ai_client
 
 from app.models.models import Anomaly, Camera, AnomalyLevel
 from app.schemas.schemas import AnomalyCreate
@@ -212,3 +213,40 @@ async def verify_anomaly_access(db: AsyncSession, anomaly_id: int, user_id: int)
         )
     
     return anomaly
+
+
+async def inference_anomaly(frame_list: List[str]) -> List[dict]:
+    """
+    Create an anomaly detected by inference system.
+    """
+    ai_client = get_ai_client()
+    # Check health of AI server
+    if not await ai_client.check_health():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI server is not available"
+        )
+    results = await ai_client.send_batch(frames_base64=frame_list, batch_index=None)
+    if not results.get("success", False):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="AI server failed to process frames"
+        )
+
+    anomaly_threshold = 0.5  # Configurable threshold for saving anomalies
+    list_detections = []
+    detections = results.get("detections", [])
+    for detection in detections:
+        anomaly_score = detection.get("anomaly_score_normalized", 0.0)
+        
+        # Only save if anomaly score is above threshold
+        if anomaly_score >= anomaly_threshold:
+            bbox = detection.get("bbox", {})
+            bbox_str = f"{bbox.get('x_min', 0)},{bbox.get('y_min', 0)},{bbox.get('x_max', 0)},{bbox.get('y_max', 0)}"
+        list_detections.append({
+            "anomaly_score": anomaly_score,
+            "bounding_box": bbox_str,
+            "class_id": detection.get("class_id", 0)
+        })
+    
+    return list_detections

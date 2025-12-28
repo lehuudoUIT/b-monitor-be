@@ -12,7 +12,7 @@ import time
 
 from app.core.database import get_db
 from app.core.dependencies import CurrentUser
-from app.schemas.schemas import CameraCreate, CameraUpdate, CameraResponse, CameraListResponse
+from app.schemas.schemas import CameraUpdate, CameraResponse, CameraListResponse, CameraCreate, StopStreamRequest
 from app.services import camera_service
 from app.services.video_processing_service import process_video_for_anomalies
 
@@ -283,13 +283,13 @@ async def upload_video(
         camera = await camera_service.create_camera(db, camera_data)
         
         # Start video processing in background (không đợi kết quả)
-        from app.services.video_processing_service import process_video_background
-        asyncio.create_task(process_video_background(
-            camera_id=camera.id,
-            user_id=current_user.id,
-            batch_size=7,
-            sliding_window=1
-        ))
+        # from app.services.video_processing_service import process_video_background
+        # asyncio.create_task(process_video_background(
+        #     camera_id=camera.id,
+        #     user_id=current_user.id,
+        #     batch_size=7,
+        #     sliding_window=1
+        # ))
 
         return camera
         
@@ -463,3 +463,187 @@ async def stream_video(
             headers=headers,
             media_type=content_type
         )
+
+
+@router.get("/{camera_id}/stream-youtube")
+async def stream_youtube_camera(
+    camera_id: int,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    session_id: Optional[str] = Query(None, description="Session ID for tracking and stopping stream"),
+    batch_size: int = Query(7, ge=5, le=15, description="Number of frames per inference batch"),
+    skip_frames: int = Query(5, ge=1, le=30, description="Number of frames to skip between inferences"),
+    fps: int = Query(30, ge=15, le=60, description="Target FPS for output stream"),
+    width: int = Query(1280, ge=640, le=1920, description="Target frame width"),
+    height: int = Query(720, ge=480, le=1080, description="Target frame height"),
+):
+    """
+    Stream YouTube livestream with real-time anomaly detection.
+    
+    This endpoint streams from YouTube livestream cameras (type='youtube') and performs
+    real-time anomaly detection using AI inference. Detected anomalies are drawn on frames
+    with bounding boxes, class names, and anomaly scores.
+    
+    **Features:**
+    - Real-time YouTube livestream processing
+    - Sliding window anomaly detection (7 frames per batch)
+    - Frame skipping to prevent GPU overload
+    - Automatic reconnection on stream interruption
+    - Color-coded bounding boxes by anomaly severity
+    - 5-7 second delay for smooth inference processing
+    
+    **Path Parameters:**
+    - **camera_id**: ID of the camera (must be type='youtube')
+    
+    **Query Parameters:**
+    - **batch_size**: Number of frames per inference batch (5-15, default: 7)
+    - **skip_frames**: Frames to skip between inferences (1-30, default: 5)
+    - **fps**: Target output FPS (15-60, default: 30)
+    - **width**: Target frame width (640-1920, default: 1280)
+    - **height**: Target frame height (480-1080, default: 720)
+    
+    **Inference Method:**
+    - Uses sliding window with configurable skip
+    - Example (skip_frames=5):
+      - Batch 1: frames 1-7 → inference for frame 4
+      - Batch 2: frames 6-12 → inference for frame 9
+      - Batch 3: frames 11-17 → inference for frame 14
+    
+    **Bounding Box Colors:**
+    - 🔴 Red: Critical (score ≥ 0.8)
+    - 🟠 Orange: High (score ≥ 0.6)
+    - 🟡 Yellow: Medium (score ≥ 0.4)
+    - 🟢 Green: Low (score < 0.4)
+    
+    **Response:**
+    - Content-Type: multipart/x-mixed-replace; boundary=frame
+    - Continuous MJPEG stream with detection overlays
+    - 200: Stream started successfully
+    - 404: Camera not found
+    - 403: Not authorized
+    - 400: Invalid camera type (must be 'youtube')
+    - 503: AI server unavailable
+    
+    **Example:**
+    ```html
+    <img src="http://localhost:8000/cameras/1/stream-youtube?skip_frames=5&fps=30" />
+    ```
+    
+    **Browser Usage:**
+    - Use <img> tag or video.js for MJPEG playback
+    - Stream includes real-time anomaly detection overlays
+    - Automatic reconnection on connection loss
+    
+    **Performance Notes:**
+    - Default delay: 5-7 seconds behind live stream
+    - Adjust skip_frames to balance detection frequency vs. GPU load
+    - Higher skip_frames = lower GPU usage, less frequent detection
+    - Lower skip_frames = higher GPU usage, more frequent detection
+    """
+    from app.services.youtube_stream_service import stream_youtube_with_anomaly_detection
+    
+    # Get camera and validate
+    camera = await camera_service.get_camera_by_id(db, camera_id)
+    
+    if not camera:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Camera not found"
+        )
+    
+    # Check ownership
+    if camera.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this camera"
+        )
+    
+    # Check camera type
+    if camera.type.value != "youtube":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only cameras with type='youtube' support YouTube streaming with detection"
+        )
+    
+    # Get YouTube URL
+    youtube_url = camera.url
+    
+    # Start streaming with anomaly detection
+    return StreamingResponse(
+        stream_youtube_with_anomaly_detection(
+            youtube_url=youtube_url,
+            session_id=session_id,
+            batch_size=batch_size,
+            skip_frames=skip_frames,
+            target_fps=fps,
+            target_width=width,
+            target_height=height
+        ),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
+
+@router.post("/{camera_id}/stop-stream")
+async def stop_youtube_stream(
+    camera_id: int,
+    request_data: StopStreamRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Stop an active YouTube stream session.
+    
+    This endpoint stops a running YouTube stream by session ID.
+    The stream and AI inference will be stopped gracefully.
+    
+    **Path Parameters:**
+    - **camera_id**: ID of the camera
+    
+    **Request Body:**
+    - **session_id**: Session ID of the stream to stop (required)
+    
+    **Response:**
+    - 200: Stream stopped successfully
+    - 404: Camera not found or session not found
+    - 403: Not authorized to access this camera
+    
+    **Example:**
+    ```bash
+    curl -X POST "http://localhost:8000/cameras/1/stop-stream" \\
+      -H "Authorization: Bearer YOUR_TOKEN" \\
+      -H "Content-Type: application/json" \\
+      -d '{"session_id": "abc123"}'
+    ```
+    """
+    from app.services.youtube_stream_service import stop_stream_session
+    
+    # Get camera and validate
+    camera = await camera_service.get_camera_by_id(db, camera_id)
+    
+    if not camera:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Camera not found"
+        )
+    
+    # Check ownership
+    if camera.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this camera"
+        )
+    
+    # Stop the stream session
+    success = stop_stream_session(request_data.session_id)
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Stream session '{request_data.session_id}' not found or already stopped"
+        )
+    
+    return {
+        "message": "Stream stopped successfully",
+        "session_id": request_data.session_id,
+        "camera_id": camera_id
+    }

@@ -18,6 +18,11 @@ class AnomalyLevel(str, Enum):
     low = "low"
 
 
+# Stream Control Schemas
+class StopStreamRequest(BaseModel):
+    session_id: str = Field(..., description="Session ID of the stream to stop")
+
+
 # User Schemas
 class UserBase(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
@@ -76,7 +81,7 @@ class CameraBase(BaseModel):
 
 
 class CameraCreate(CameraBase):
-    user_id: int
+    user_id: Optional[int] = None
 
 
 class CameraUpdate(BaseModel):
