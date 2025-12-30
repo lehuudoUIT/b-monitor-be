@@ -165,9 +165,7 @@ if __name__ == "__main__":
     # CONFIGURATION - Modify these values
     # ============================================
     
-    # Option 1: Use existing token
-    TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzdHJpbmciLCJleHAiOjE3NjY4MjU0MTV9.smIpeZ8PTZb7VPfqGFqeOnoaVAkl4nhAJXjkEBG8tD4"  # Set your token here or leave None to login
-    
+    TOKEN = os.getenv("TEST_USER_TOKEN")  # Set your JWT token here
     
     # Camera settings
     CAMERA_ID = 11  # Change to your YouTube camera ID
