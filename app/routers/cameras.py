@@ -283,13 +283,25 @@ async def upload_video(
         camera = await camera_service.create_camera(db, camera_data)
         
         # Start video processing in background (không đợi kết quả)
-        # from app.services.video_processing_service import process_video_background
-        # asyncio.create_task(process_video_background(
-        #     camera_id=camera.id,
-        #     user_id=current_user.id,
-        #     batch_size=7,
-        #     sliding_window=1
-        # ))
+        from app.services.video_processing_service import process_video_background
+        video_width, video_height = map(int, video_resolution.split(","))
+        resolution_area = video_width * video_height
+        sliding_window = 1
+        if resolution_area <= 300000:
+            sliding_window = 1
+        elif resolution_area > 300000 and resolution_area <= 1000000:
+            sliding_window = 3
+        elif resolution_area > 1000000 and resolution_area <= 4000000:
+            sliding_window = 5
+        else:
+            sliding_window = 7
+
+        asyncio.create_task(process_video_background(
+            camera_id=camera.id,
+            user_id=current_user.id,
+            batch_size=7,
+            sliding_window=sliding_window
+        ))
 
         return camera
         
