@@ -194,9 +194,33 @@ async def process_video_for_anomalies(
         )
 
 
-async def process_video_background(camera_id: int, user_id: int, batch_size: int = 7, sliding_window: int = 1):
+def process_video_background(camera_id: int, user_id: int, batch_size: int = 7, sliding_window: int = 1):
     """
-    Background task to process video for anomalies with its own database session.
+    Background task wrapper to process video for anomalies.
+    This is a sync function that will be executed in a thread executor to avoid blocking.
+    
+    Args:
+        camera_id: ID of camera to process
+        user_id: ID of current user
+        batch_size: Number of frames per batch
+        sliding_window: Step size for sliding window
+    """
+    import asyncio
+    
+    # Create new event loop for this thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        result = loop.run_until_complete(_process_video_async(camera_id, user_id, batch_size, sliding_window))
+        return result
+    finally:
+        loop.close()
+
+
+async def _process_video_async(camera_id: int, user_id: int, batch_size: int = 7, sliding_window: int = 1):
+    """
+    Internal async function to process video for anomalies with its own database session.
     This function catches all exceptions to prevent them from affecting the main request.
     
     Args:

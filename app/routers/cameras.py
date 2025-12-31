@@ -1,5 +1,5 @@
 import cv2
-from fastapi import APIRouter, Depends, Form, HTTPException, status, Query, UploadFile, File, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, status, Query, UploadFile, File, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
@@ -9,12 +9,13 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 import time
+from functools import partial
 
 from app.core.database import get_db
 from app.core.dependencies import CurrentUser
 from app.schemas.schemas import CameraUpdate, CameraResponse, CameraListResponse, CameraCreate, StopStreamRequest
 from app.services import camera_service
-from app.services.video_processing_service import process_video_for_anomalies
+from app.services.video_processing_service import process_video_for_anomalies, process_video_background
 
 router = APIRouter()
 
@@ -145,6 +146,7 @@ async def delete_camera(
 
 @router.post("/upload-video", response_model=CameraResponse, status_code=status.HTTP_201_CREATED)
 async def upload_video(
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser,
     name: str = Form(...),
     location: str = Form(""),
@@ -282,8 +284,11 @@ async def upload_video(
         
         camera = await camera_service.create_camera(db, camera_data)
         
-        # Start video processing in background (không đợi kết quả)
-        from app.services.video_processing_service import process_video_background
+        # Commit transaction immediately to persist camera to database
+        await db.commit()
+        await db.refresh(camera)
+
+        # Calculate sliding window based on resolution
         video_width, video_height = map(int, video_resolution.split(","))
         resolution_area = video_width * video_height
         sliding_window = 1
@@ -296,13 +301,42 @@ async def upload_video(
         else:
             sliding_window = 7
 
-        asyncio.create_task(process_video_background(
-            camera_id=camera.id,
-            user_id=current_user.id,
-            batch_size=7,
-            sliding_window=sliding_window
-        ))
+        # Schedule background task properly without blocking event loop
+        # Run the task asynchronously in background without using thread executor
+        async def async_process_video():
+            try:
+                # Use asyncio.to_thread to run blocking function in thread pool
+                await asyncio.to_thread(
+                    process_video_background,
+                    camera_id=camera.id,
+                    user_id=current_user.id,
+                    batch_size=7,
+                    sliding_window=sliding_window
+                )
+            except Exception as e:
+                print(f"Error in background video processing for camera {camera.id}: {e}")
+                import traceback
+                traceback.print_exc()
+                # Update camera status to error if processing fails
+                try:
+                    from app.core.database import get_async_session_context
+                    async with get_async_session_context() as error_db:
+                        error_camera = await camera_service.get_camera_by_id(error_db, camera.id)
+                        if error_camera:
+                            await camera_service.update_camera(
+                                error_db, 
+                                camera.id, 
+                                CameraUpdate(status="inactive"), 
+                                current_user.id
+                            )
+                            await error_db.commit()
+                except Exception as db_error:
+                    print(f"Failed to update camera status on error: {db_error}")
+        
+        # Add task to background tasks (will run after response is sent)
+        background_tasks.add_task(async_process_video)
 
+        # Return immediately - background task will run after response is sent
         return camera
         
     except HTTPException:

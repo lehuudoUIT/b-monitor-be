@@ -34,8 +34,26 @@ class AIServerClient:
             timeout: Request timeout in seconds
         """
         self.server_url = server_url
-        self.semaphore = asyncio.Semaphore(max_concurrent)
+        self.max_concurrent = max_concurrent
+        self._semaphore = None
+        self._semaphore_loop = None
         self.timeout = aiohttp.ClientTimeout(total=timeout)
+    
+    @property
+    def semaphore(self):
+        """Get or create semaphore for current event loop"""
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No event loop running, create one
+            current_loop = asyncio.get_event_loop()
+        
+        # Create new semaphore if it doesn't exist or is bound to different loop
+        if self._semaphore is None or self._semaphore_loop != current_loop:
+            self._semaphore = asyncio.Semaphore(self.max_concurrent)
+            self._semaphore_loop = current_loop
+        
+        return self._semaphore
     
     async def check_health(self) -> bool:
         """

@@ -238,15 +238,15 @@ async def inference_anomaly(frame_list: List[str]) -> List[dict]:
     detections = results.get("detections", [])
     for detection in detections:
         anomaly_score = detection.get("anomaly_score_normalized", 0.0)
+        bbox = detection.get("bbox", {})
+        bbox_str = f"{bbox.get('x_min', 0)},{bbox.get('y_min', 0)},{bbox.get('x_max', 0)},{bbox.get('y_max', 0)}"
         
         # Only save if anomaly score is above threshold
         if anomaly_score >= anomaly_threshold:
-            bbox = detection.get("bbox", {})
-            bbox_str = f"{bbox.get('x_min', 0)},{bbox.get('y_min', 0)},{bbox.get('x_max', 0)},{bbox.get('y_max', 0)}"
-        list_detections.append({
-            "anomaly_score": anomaly_score,
-            "bounding_box": bbox_str,
-            "class_id": detection.get("class_id", 0)
-        })
+            list_detections.append({
+                "anomaly_score": anomaly_score,
+                "bounding_box": bbox_str,
+                "class_id": detection.get("class_id", 0)
+            })
     
     return list_detections
