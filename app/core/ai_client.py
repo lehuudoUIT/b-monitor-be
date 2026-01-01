@@ -75,6 +75,47 @@ class AIServerClient:
         except aiohttp.ClientError:
             return False
 
+    async def send_video_file(
+        self,
+        video_path: str
+    ) -> Dict[str, Any]:
+        """
+        Send entire video file to AI server for processing (v2 endpoint).
+        
+        Args:
+            video_path: Path to the video file
+            
+        Returns:
+            Response from AI server with all detections
+            
+        Raises:
+            aiohttp.ClientError: If request fails
+        """
+        inference_url = self.server_url + "/worker/inference/video"
+        
+        # Create multipart form data with video file
+        data = aiohttp.FormData()
+        data.add_field('video',
+                      open(video_path, 'rb'),
+                      filename=os.path.basename(video_path),
+                      content_type='video/mp4')
+        data.add_field('sliding_window', os.getenv("AI_SLIDING_WINDOW", "1"))
+        data.add_field('batch_size', os.getenv("AI_DETECTION_BATCH_SIZE", "4"))
+        
+        try:
+            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+                async with session.post(inference_url, data=data) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        return result
+                    else:
+                        error_text = await response.text()
+                        raise aiohttp.ClientError(
+                            f"AI server returned status {response.status}: {error_text}"
+                        )
+        except aiohttp.ClientError as e:
+            raise e
+
     async def send_batch(
         self,
         frames_base64: List[str],

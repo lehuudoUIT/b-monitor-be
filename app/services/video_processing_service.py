@@ -17,6 +17,180 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
+async def process_video_direct(
+    db: AsyncSession,
+    camera_id: int,
+    video_path: str,
+    user_id: int
+) -> Dict[str, Any]:
+    """
+    Process video by sending entire file to AI server (v2 endpoint).
+    
+    This version sends the complete video file to AI server at /worker/inference/v2
+    and receives all detections at once instead of processing in batches.
+    
+    Args:
+        db: Database session
+        camera_id: ID of camera to process
+        video_path: Path to the video file
+        user_id: ID of current user (for authorization)
+        
+    Returns:
+        Dictionary with processing results and detected anomalies
+        
+    Raises:
+        HTTPException: If validation fails or processing errors occur
+    """
+    from app.services.camera_service import get_camera_by_id
+    
+    # Step 1: Validate camera
+    camera = await get_camera_by_id(db, camera_id)
+    
+    if not camera:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Camera with id {camera_id} not found"
+        )
+    
+    if camera.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to process this camera"
+        )
+    
+    if camera.type.value != "local":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only local cameras can be processed with this endpoint"
+        )
+    
+    # Step 2: Check AI server health
+    ai_client = get_ai_client()
+    if not await ai_client.check_health():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI server is not available"
+        )
+    
+    # Step 3: Send video file to AI server
+    logger.info(f"Sending video file to AI server for camera {camera_id}")
+    try:
+        result = await ai_client.send_video_file(video_path)
+    except Exception as e:
+        logger.error(f"Failed to send video to AI server: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process video on AI server: {str(e)}"
+        )
+    
+    # Step 4: Process results and save anomalies
+    anomalies_saved = []
+    anomaly_threshold = 0.5  # Configurable threshold for saving anomalies
+    
+    detections = result.get("detections", [])
+    logger.info(f"Received {len(detections)} detections from AI server")
+    
+    for detection in detections:
+        anomaly_score = detection.get("anomaly_score", 0.0)
+        frame_id = detection.get("frame_id", 0)
+        
+        # Only save if anomaly score is above threshold
+        if anomaly_score >= anomaly_threshold:
+            bbox = detection.get("bbox", {})
+            bbox_str = f"{bbox.get('x_min', 0)},{bbox.get('y_min', 0)},{bbox.get('x_max', 0)},{bbox.get('y_max', 0)}"
+            
+            # Determine anomaly level based on score
+            if anomaly_score >= 0.8:
+                level = "critical"
+            elif anomaly_score >= 0.6:
+                level = "high"
+            elif anomaly_score >= 0.4:
+                level = "medium"
+            else:
+                level = "low"
+            
+            # Create anomaly record
+            anomaly = Anomaly(
+                time=datetime.utcnow(),
+                type=detection.get("class_name", "detected_anomaly"),
+                description=f"Anomaly detected in frame {frame_id} with score {anomaly_score:.4f}",
+                level=level,
+                cam_id=camera_id,
+                anomaly_score=anomaly_score,
+                bounding_box=bbox_str,
+                frame_id=frame_id,
+                class_id=detection.get("class_id", 0)
+            )
+            
+            db.add(anomaly)
+            anomalies_saved.append({
+                "frame_id": frame_id,
+                "anomaly_score": anomaly_score,
+                "bbox": bbox_str,
+                "level": level,
+                "class_id": detection.get("class_id", 0)
+            })
+    
+    # Commit all anomalies
+    await db.commit()
+    
+    logger.info(f"Saved {len(anomalies_saved)} anomalies for camera {camera_id}")
+    
+    return {
+        "camera_id": camera_id,
+        "total_detections": len(detections),
+        "anomalies_saved": len(anomalies_saved),
+        "anomalies": anomalies_saved
+    }
+
+
+def process_video_direct_background(
+    camera_id: int,
+    video_path: str,
+    user_id: int
+):
+    """
+    Background task wrapper for process_video_direct.
+    Runs in a separate thread via asyncio.to_thread.
+    
+    Args:
+        camera_id: ID of camera to process
+        video_path: Path to the video file
+        user_id: ID of current user
+    """
+    import asyncio
+    from app.core.database import async_session_maker
+    
+    async def _process():
+        async with async_session_maker() as db:
+            try:
+                result = await process_video_direct(db, camera_id, video_path, user_id)
+                logger.info(f"Background processing completed for camera {camera_id}: {result}")
+                
+                # Update camera status to active
+                from app.services.camera_service import update_camera
+                from app.schemas.schemas import CameraUpdate
+                await update_camera(db, camera_id, CameraUpdate(status="active"), user_id)
+                await db.commit()
+                
+            except Exception as e:
+                logger.error(f"Error in background processing for camera {camera_id}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                
+                # Update camera status to inactive on error
+                try:
+                    from app.services.camera_service import update_camera
+                    from app.schemas.schemas import CameraUpdate
+                    await update_camera(db, camera_id, CameraUpdate(status="inactive"), user_id)
+                    await db.commit()
+                except Exception as update_error:
+                    logger.error(f"Failed to update camera status: {str(update_error)}")
+    
+    # Run the async function in the current event loop
+    asyncio.run(_process())
+
+
 async def process_video_for_anomalies(
     db: AsyncSession,
     camera_id: int,

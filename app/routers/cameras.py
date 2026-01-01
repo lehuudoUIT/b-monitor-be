@@ -15,7 +15,7 @@ from app.core.database import get_db
 from app.core.dependencies import CurrentUser
 from app.schemas.schemas import CameraUpdate, CameraResponse, CameraListResponse, CameraCreate, StopStreamRequest
 from app.services import camera_service
-from app.services.video_processing_service import process_video_for_anomalies, process_video_background
+from app.services.video_processing_service import process_video_for_anomalies, process_video_background, process_video_direct_background
 
 router = APIRouter()
 
@@ -335,6 +335,213 @@ async def upload_video(
         
         # Add task to background tasks (will run after response is sent)
         background_tasks.add_task(async_process_video)
+
+        # Return immediately - background task will run after response is sent
+        return camera
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Clean up file if camera creation fails
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload video: {str(e)}"
+        )
+
+
+@router.post("/upload-video-v2", response_model=CameraResponse, status_code=status.HTTP_201_CREATED)
+async def upload_video_v2(
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser,
+    name: str = Form(...),
+    location: str = Form(""),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Upload a video file and create a new local camera (Version 2 - Direct AI Processing).
+    
+    This endpoint uploads video files and sends the entire video to AI server
+    at /worker/inference/v2 for processing. The AI server returns all detections
+    at once instead of processing in batches.
+    
+    **Differences from v1:**
+    - Sends entire video file to AI server instead of processing in batches
+    - Uses /worker/inference/v2 endpoint
+    - AI server processes all frames and returns complete results
+    - More efficient for smaller videos or when batch processing overhead is high
+    
+    **File Upload Limits:**
+    - Max file size: 500MB (configurable via MAX_VIDEO_SIZE_MB)
+    - Upload speed limit: 10MB/s (configurable via MAX_UPLOAD_SPEED_MB_PER_SEC)
+    - Supported formats: .mp4, .avi, .mov, .mkv, .flv
+    
+    **Form Data:**
+    - **name**: Camera name (required)
+    - **location**: Camera location/address (optional)
+    - **file**: Video file to upload (required)
+    
+    **Response:**
+    - Returns the created camera object with:
+      - **url**: Local file path where video is saved
+      - **type**: Automatically set to "local"
+      - **status**: Initially "inactive", set to "active" after processing
+    
+    **AI Processing:**
+    - Video is sent to AI server at /worker/inference/v2
+    - AI server returns bounding boxes with metadata:
+      - frame_id: Frame number where anomaly was detected
+      - anomaly_score: Confidence score (0.0 to 1.0)
+      - bbox: Bounding box coordinates (x_min, y_min, x_max, y_max)
+      - class_id: Detected class identifier
+      - class_name: Name of detected anomaly class
+    - Anomalies with score >= 0.5 are saved to database
+    
+    **Error Cases:**
+    - 400: Invalid file type or file too large
+    - 413: File size exceeds limit
+    - 500: File upload or save error
+    - 503: AI server unavailable
+    
+    **Example:**
+    ```bash
+    curl -X POST "http://localhost:8000/cameras/upload-video-v2" \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -F "name=Front Gate Camera" \
+      -F "location=Building A Entrance" \
+      -F "file=@/path/to/video.mp4"
+    ```
+    """
+    # Get configuration from environment
+    UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads/videos")
+    MAX_VIDEO_SIZE_MB = int(os.getenv("MAX_VIDEO_SIZE_MB", "500"))
+    MAX_UPLOAD_SPEED_MB_PER_SEC = int(os.getenv("MAX_UPLOAD_SPEED_MB_PER_SEC", "10"))
+    
+    # Convert MB to bytes
+    MAX_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024
+    MAX_SPEED_BYTES_PER_SEC = MAX_UPLOAD_SPEED_MB_PER_SEC * 1024 * 1024
+    CHUNK_SIZE = 1024 * 1024  # 1MB chunks
+    
+    # Validate file type
+    allowed_extensions = [".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm"]
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    
+    if file_ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"
+        )
+    
+    # Create upload directory if it doesn't exist
+    Path(UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+    
+    # Generate unique filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_filename = f"{timestamp}_{current_user.id}_{file.filename}"
+    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    
+    try:
+        # Upload file with size and speed limits
+        total_size = 0
+        start_time = time.time()
+        
+        async with aiofiles.open(file_path, "wb") as f:
+            while chunk := await file.read(CHUNK_SIZE):
+                chunk_size = len(chunk)
+                total_size += chunk_size
+                
+                # Check file size limit
+                if total_size > MAX_SIZE_BYTES:
+                    # Delete partial file
+                    await f.close()
+                    os.remove(file_path)
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"File size exceeds limit of {MAX_VIDEO_SIZE_MB}MB"
+                    )
+                
+                # Write chunk
+                await f.write(chunk)
+                
+                # Apply speed limit
+                elapsed = time.time() - start_time
+                expected_time = total_size / MAX_SPEED_BYTES_PER_SEC
+                if elapsed < expected_time:
+                    await asyncio.sleep(expected_time - elapsed)
+        
+        
+        video_fps = 30
+        video_resolution = "1920,1080"
+        # Use cv2 to extract metadata 
+        try:
+            cap = cv2.VideoCapture(file_path)
+            if cap.isOpened():
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                if fps > 0:
+                    video_fps = int(round(fps)) 
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                if width > 0 and height > 0:
+                    video_resolution = f"{width},{height}"
+                cap.release()
+            else:
+                print(f"Warning: Could not open video file {file_path} to read metadata.")
+        except Exception as e:
+            print(f"Error reading video metadata: {e}")
+
+        # Create camera record
+        camera_data = CameraCreate(
+            name=name,
+            location=location,
+            thumbnail="",
+            status="inactive",
+            url=file_path,
+            type="local",
+            fps=video_fps,
+            resolution=video_resolution,
+            user_id=current_user.id
+        )
+        
+        camera = await camera_service.create_camera(db, camera_data)
+        
+        # Commit transaction immediately to persist camera to database
+        await db.commit()
+        await db.refresh(camera)
+
+        # Schedule background task for direct video processing
+        async def async_process_video_v2():
+            try:
+                # Use asyncio.to_thread to run blocking function in thread pool
+                await asyncio.to_thread(
+                    process_video_direct_background,
+                    camera_id=camera.id,
+                    video_path=file_path,
+                    user_id=current_user.id
+                )
+            except Exception as e:
+                print(f"Error in background video processing v2 for camera {camera.id}: {e}")
+                import traceback
+                traceback.print_exc()
+                # Update camera status to error if processing fails
+                try:
+                    from app.core.database import get_async_session_context
+                    async with get_async_session_context() as error_db:
+                        error_camera = await camera_service.get_camera_by_id(error_db, camera.id)
+                        if error_camera:
+                            await camera_service.update_camera(
+                                error_db, 
+                                camera.id, 
+                                CameraUpdate(status="inactive"), 
+                                current_user.id
+                            )
+                            await error_db.commit()
+                except Exception as db_error:
+                    print(f"Failed to update camera status on error: {db_error}")
+        
+        # Add task to background tasks (will run after response is sent)
+        background_tasks.add_task(async_process_video_v2)
 
         # Return immediately - background task will run after response is sent
         return camera
